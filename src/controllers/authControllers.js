@@ -108,13 +108,15 @@ const flightDelete=async (req,res)=>{
     }
 }//flightDelete fonksiyonu oluşturuldu
 
-
-const flightSaveToDB = async (req, res) => {
+const flightSaveToDB = async (req, res, next) => {
     try {
-        const {flightNumber}=req.body;
-        if(!flightNumber){
-            return res.status(400).json({message:"Uçuş numarası giriniz"});
+        const { flightNumbers } = req.body;
+
+        // Uçuş numaraları kontrolü array olmalı ve boş olmamalı
+        if (!Array.isArray(flightNumbers) || flightNumbers.length === 0) {
+            return res.status(400).json({ message: "Uçuş numaraları giriniz" })
         }
+
         const APIUrl = "https://api.schiphol.nl/public-flights/flights";
         const response = await axios.get(APIUrl, {
             headers: {
@@ -124,51 +126,67 @@ const flightSaveToDB = async (req, res) => {
                 "ResourceVersion": "v4"
             }
         });
+        // API'den gelen uçuşlar
         const flights = response.data.flights;
-        const filteredFlight = flights.find(flight => flight.flightNumber === flightNumber);
-        if (!filteredFlight) {
-            return res.status(404).json({ message: 'Uçuş bulunamadı' });
+        const newFlights = [];
+        // Uçuş numaralarına göre filtreleme
+        for (const flightNumber of flightNumbers) {
+            const filteredFlight = flights.find(flight => flight.flightNumber === flightNumber);
+
+            if (!filteredFlight) {
+                console.log(`Uçuş bulunamadı: ${flightNumber}`);
+                continue;
+            }
+            // Uçuş numarasına göre filtreleme
+            const restoreFlight = await flightModel.findOne({ flightNumber });
+            if (restoreFlight) {
+                console.log(`Uçuş zaten kayıtlı: ${flightNumber}`);
+                continue;
+            }
+            // Yeni uçuş modeli oluşturuldu
+            const newFlight = new flightModel({
+                flightNumber: filteredFlight.flightNumber,
+                flightName: filteredFlight.flightName,
+                actualLandingTime: filteredFlight.actualLandingTime,
+                aircraftType: {
+                    iataMain: filteredFlight.aircraftType.iataMain,
+                    iataSub: filteredFlight.aircraftType.iataSub
+                },
+                airlineCode: filteredFlight.airlineCode,
+                estimatedLandingTime: filteredFlight.estimatedLandingTime,
+                flightDirection: filteredFlight.flightDirection,
+                isOperationalFlight: filteredFlight.isOperationalFlight,
+                lastUpdatedAt: filteredFlight.lastUpdatedAt,
+                mainFlight: filteredFlight.mainFlight,
+                prefixIATA: filteredFlight.prefixIATA,
+                prefixICAO: filteredFlight.prefixICAO,
+                route: {
+                    destinations: filteredFlight.route.destinations,
+                    eu: filteredFlight.route.eu,
+                    visa: filteredFlight.route.visa
+                },
+                scheduleDate: filteredFlight.scheduleDate,
+                scheduleDateTime: filteredFlight.scheduleDateTime,
+                scheduleTime: filteredFlight.scheduleTime,
+                serviceType: filteredFlight.serviceType,
+                terminal: filteredFlight.terminal,
+                randomPrice: filteredFlight.randomPrice
+            });
+            // Yeni uçuş kaydedildi db'ye
+            await newFlight.save();
+            // Yeni uçuşlar listesine eklendi
+            newFlights.push(newFlight);
         }
-        const restoreFlight = await flightModel.findOne({ flightNumber: flightNumber });
-        if (restoreFlight) {
-            return res.status(400).json({ message: 'Uçuş zaten kayıtlı' });
+        // Yeni uçuşlar listesi boş ise hata döndürüldü
+        if (newFlights.length === 0) {
+            return res.status(400).json({ message: "Hiçbir yeni uçuş kaydedilmedi" });
         }
-        const newFlight = new flightModel({
-            flightNumber: filteredFlight.flightNumber,
-            flightName: filteredFlight.flightName,
-            actualLandingTime: filteredFlight.actualLandingTime,
-            aircraftType: {
-                iataMain: filteredFlight.aircraftType.iataMain,
-                iataSub: filteredFlight.aircraftType.iataSub
-            },
-            airlineCode: filteredFlight.airlineCode,
-            estimatedLandingTime: filteredFlight.estimatedLandingTime,
-            flightDirection: filteredFlight.flightDirection,
-            isOperationalFlight: filteredFlight.isOperationalFlight,
-            lastUpdatedAt: filteredFlight.lastUpdatedAt,
-            mainFlight: filteredFlight.mainFlight,
-            prefixIATA: filteredFlight.prefixIATA,
-            prefixICAO: filteredFlight.prefixICAO,
-            route: {
-                destinations: filteredFlight.route.destinations,
-                eu: filteredFlight.route.eu,
-                visa: filteredFlight.route.visa
-            },
-            scheduleDate: filteredFlight.scheduleDate,
-            scheduleDateTime: filteredFlight.scheduleDateTime,
-            scheduleTime: filteredFlight.scheduleTime,
-            serviceType: filteredFlight.serviceType,
-            terminal: filteredFlight.terminal,
-            randomPrice: filteredFlight.randomPrice
-        })
-        await newFlight.save();
-        console.log(newFlight);
-        return res.json(newFlight);
+        
+        return res.json(newFlights);
     } catch (error) {
         next(new APIError(500, error.message));
     }
-}
-    
+};
 
 
 module.exports = { flightList, flightId ,dbflightList,flightDelete,flightListForScheduleTime,flightSaveToDB}; // flightList fonksiyonu dışarı aktarıldı
